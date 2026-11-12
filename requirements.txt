@@ -1,0 +1,6 @@
+requests
+edge-tts
+numpy
+pillow<10
+moviepy==1.0.3
+imageio-ffmpeg
