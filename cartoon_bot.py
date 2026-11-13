@@ -8,17 +8,6 @@ import urllib.parse
 import edge_tts
 import numpy as np
 import requests
-from moviepy.editor import (AudioFileClip, CompositeAudioClip, VideoClip,
-import asyncio
-import json
-import os
-import random
-import time
-import urllib.parse
-
-import edge_tts
-import numpy as np
-import requests
 from moviepy.editor import AudioFileClip, CompositeAudioClip, VideoClip, afx, concatenate_videoclips
 from PIL import Image, ImageDraw, ImageFont
 
