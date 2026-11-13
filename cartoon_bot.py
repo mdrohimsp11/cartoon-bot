@@ -9,11 +9,26 @@ import edge_tts
 import numpy as np
 import requests
 from moviepy.editor import (AudioFileClip, CompositeAudioClip, VideoClip,
+import asyncio
+import json
+import os
+import random
+import time
+import urllib.parse
+
+import edge_tts
+import numpy as np
+import requests
+from moviepy.editor import (AudioFileClip, CompositeAudioClip, VideoClip,
                             afx, concatenate_videoclips)
 from PIL import Image, ImageDraw, ImageFont
 
 GEMINI_KEY = os.environ["GEMINI_API_KEY"]
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+MODELS = []
+for _m in (os.environ.get("GEMINI_MODEL"), "gemini-flash-latest",
+           "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-lite-latest"):
+    if _m and _m not in MODELS:
+        MODELS.append(_m)
 OUT = "output"
 W, H = 1080, 1920
 FPS = 24
@@ -79,27 +94,30 @@ def make_story():
     used = []
     if os.path.exists("used_titles.json"):
         used = json.load(open("used_titles.json"))
-    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}")
     body = {
         "contents": [{"parts": [{"text": PROMPT.format(
             idea=random.choice(IDEAS), used=used[-20:])}]}],
         "generationConfig": {"responseMimeType": "application/json"},
     }
     last_err = None
-    for _ in range(3):
-        try:
-            r = requests.post(url, json=body, timeout=120)
-            r.raise_for_status()
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            story = json.loads(text)
-            assert story["shots"] and story["characters"]
-            used.append(story["title"])
-            json.dump(used, open("used_titles.json", "w"))
-            return story
-        except Exception as e:
-            last_err = e
-            time.sleep(5)
+    for rnd in range(4):
+        for model in MODELS:
+            url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+                   f"{model}:generateContent?key={GEMINI_KEY}")
+            try:
+                r = requests.post(url, json=body, timeout=120)
+                r.raise_for_status()
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                story = json.loads(text)
+                assert story["shots"] and story["characters"]
+                used.append(story["title"])
+                json.dump(used, open("used_titles.json", "w"))
+                print("Story made with model:", model)
+                return story
+            except Exception as e:
+                last_err = e
+                print(f"Gemini model {model} failed: {e}")
+        time.sleep(20 * (rnd + 1))
     raise RuntimeError(f"Story generation failed: {last_err}")
 
 
