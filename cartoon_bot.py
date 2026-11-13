@@ -27,42 +27,91 @@ VOICES = {
     "narrator": "en-US-JennyNeural",
 }
 
-STYLE = ("3D animated movie still, Pixar style, cute chubby proportions, "
-         "big expressive eyes, soft cinematic lighting, cozy warm modern home, "
-         "highly detailed, vertical 9:16 composition, no text, no watermark")
+CHARACTERS = {
+    "dad": ("Sam, a friendly chubby adult man about 35 years old, light brown skin, "
+            "short black hair, short trimmed black beard, kind brown eyes, "
+            "always wearing a green t-shirt and grey sweatpants"),
+    "girl": ("Lily, a cute 3-year-old toddler girl with a big round head, light brown skin, "
+             "big brown eyes, chubby cheeks, two black pigtails with yellow hair ties, "
+             "small round toddler body, always wearing a yellow t-shirt and light blue "
+             "overalls, fully covered, child proportions"),
+}
 
-IDEAS = [
-    "the little girl gives her sleepy dad a funny makeover with toy makeup",
-    "the little girl cooks a pretend dinner and dad has to eat it",
-    "dad tries to take a nap but the little girl keeps sneaking in toys",
-    "the little girl plays doctor and treats dad's pretend injuries",
-    "dad and the little girl build a blanket fort that collapses",
-    "the little girl opens a pretend ice cream shop in the living room",
-    "dad tries to hide a cookie from the hungry little girl",
-    "the little girl teaches dad to dance and he trips",
-    "the little girl paints dad's face while he is playing a game",
-    "dad and the little girl have a bubble bath adventure",
+STYLE = ("3D animated Pixar-style family movie still, soft cinematic lighting, "
+         "cozy colorful home, wholesome children's cartoon, everyone fully clothed "
+         "in modest clothes, vertical 9:16, no text, no watermark")
+
+SITUATIONS = [
+    "Lily gives sleepy Sam a funny makeover with toy makeup",
+    "Lily cooks a pretend dinner in the kitchen and Sam has to eat it",
+    "Sam tries to nap on the sofa but Lily keeps sneaking toys onto him",
+    "Lily plays doctor and treats Sam's pretend injuries",
+    "Sam and Lily build a blanket fort that collapses",
+    "Lily opens a pretend ice cream shop in the living room",
+    "Sam tries to hide a cookie from hungry Lily",
+    "Lily teaches Sam to dance and he trips",
+    "Lily paints Sam's face while he plays a video game",
+    "Sam and Lily have a tea party with stuffed toys",
+    "Lily becomes the boss of a pretend hair salon and Sam is the customer",
+    "Sam tries to fix a toy car and Lily gives silly advice",
+    "Lily plays teacher and gives Sam homework",
+    "Sam and Lily plant a garden and a funny thing grows",
+    "Lily pretends to be a firefighter and rescues Sam from the sofa",
+    "Sam tries to read a story but Lily changes every ending",
+    "Lily and Sam have a living room race with toy cars",
+    "Lily runs a pretend pizza shop and Sam orders",
+    "Sam tries to give the toy dinosaur a picnic in the garden and Lily has other plans",
+    "Lily is a magic show host and Sam is the volunteer",
+    "Sam tries to hide a surprise cake for a party while Lily keeps nearly telling",
+    "Lily pretends to be a superhero and Sam is the villain who stole her teddy",
+    "Sam and Lily play hide and seek in the house",
+    "Lily becomes a little painter and decorates the living room wall with washable paint",
+    "Sam tries to teach Lily to ride a tiny bike in the garden",
+    "Lily plays shopkeeper and sells Sam invisible vegetables",
+    "Sam and Lily build a tower of cups that keeps falling",
+    "Lily pretends to be a puppy and Sam has to walk her",
+    "Sam cooks pancakes and Lily flips one onto his head",
+    "Lily plays a pretend concert with pots and pans and Sam is the audience",
 ]
 
+TWISTS = [
+    "a surprise at the very end",
+    "Sam loses patience for a second, then laughs",
+    "Lily outsmarts Sam in a cute way",
+    "a funny mess everywhere",
+    "a pet or toy comes alive in Lily's imagination",
+    "Sam ends up looking silly",
+    "a sweet hug at the end",
+    "the plan goes wrong in a funny way",
+]
+
+
+def pick_idea():
+    day = int(time.time() // 86400)
+    situation = SITUATIONS[day % len(SITUATIONS)]
+    twist = random.choice(TWISTS)
+    return f"{situation}. Twist: {twist}"
+
+
 PROMPT = """You write wholesome, funny 25-30 second family cartoon shorts shown as a
-3D animated mini movie. Main characters: a chubby friendly dad and his cute toddler
-daughter, at home. Story idea to start from: {idea}
+3D animated mini movie for kids. These are episodes of one series, with the SAME two
+characters every time: "Sam" (a chubby, kind dad) and "Lily" (his 3-year-old toddler
+daughter). Every episode must be a NEW, original story - not the obvious version of the
+idea. Use a surprising funny moment and a satisfying ending. The story takes place in
+the living room, kitchen or garden of their home.
+Starting idea for this episode: {idea}
 
 Return ONLY JSON with this exact shape:
 {{
   "title": "catchy YouTube Shorts title, max 80 chars, 1-2 emojis",
   "description": "2-3 sentence description, then a call to like and subscribe",
   "hashtags": ["#cartoon", "#family", "#shorts"],
-  "characters": {{
-    "dad": "fixed look: age, skin tone, hairstyle, beard, clothes",
-    "girl": "fixed look: toddler age, skin tone, hairstyle, clothes"
-  }},
   "thumbnail_shot": 0,
   "thumbnail_text": "max 3 words, curiosity-grabbing, for the thumbnail",
   "shots": [
     {{
       "who": ["dad", "girl"],
-      "image_prompt": "camera shot type (wide / medium / close-up on face) + the one funny action + facial expressions + where in the home",
+      "image_prompt": "camera shot type (wide / medium / close-up on face) + the ONE funny action happening + facial expressions + the room and props. Do not describe the characters' looks or clothes.",
       "speaker": "girl or dad or narrator or none",
       "line": "spoken line, max 8 words, or empty string",
       "caption": "big on-screen text, max 4 words, or empty string"
@@ -70,10 +119,12 @@ Return ONLY JSON with this exact shape:
   ]
 }}
 Rules:
-- 10 to 12 shots. Each shot is one clear visual action, easy to understand without sound.
-- Mix wide shots and close-ups of faces. Start with a wide shot of the home.
+- 10 to 12 shots. Each shot shows a DIFFERENT action or place, easy to understand without sound.
+- Mix wide shots and close-ups of faces. Start with a wide shot of the room.
 - Build up to a funny punchline, then a cute ending. The last shot has the caption.
 - thumbnail_shot is the 0-based number of the funniest close-up shot (a face with a big expression).
+- In spoken lines and captions use the names Sam and Lily.
+- Everyone is always fully dressed. Never write about bathing, bedrooms, swimming, underwear or anything revealing.
 - Safe and wholesome for kids. No scary or sad content.
 - Do not reuse these titles: {used}"""
 
@@ -84,7 +135,7 @@ def make_story():
         used = json.load(open("used_titles.json"))
     body = {
         "contents": [{"parts": [{"text": PROMPT.format(
-            idea=random.choice(IDEAS), used=used[-20:])}]}],
+            idea=pick_idea(), used=used[-20:])}]}],
         "generationConfig": {"responseMimeType": "application/json"},
     }
     last_err = None
@@ -97,7 +148,7 @@ def make_story():
                 r.raise_for_status()
                 text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 story = json.loads(text)
-                assert story["shots"] and story["characters"]
+                assert story["shots"]
                 used.append(story["title"])
                 json.dump(used, open("used_titles.json", "w"))
                 print("Story made with model:", model)
@@ -109,24 +160,34 @@ def make_story():
     raise RuntimeError(f"Story generation failed: {last_err}")
 
 
-def build_prompt(shot, chars):
-    looks = "; ".join(f"{k}: {chars[k]}" for k in shot.get("who", []) if k in chars)
-    return f"{STYLE}. Characters: {looks}. Scene: {shot['image_prompt']}"
+def build_prompt(shot):
+    who = [k for k in shot.get("who", []) if k in CHARACTERS] or ["dad", "girl"]
+    looks = "; ".join(f"{k}: {CHARACTERS[k]}" for k in who)
+    return f"{shot['image_prompt']}. Characters: {looks}. {STYLE}"
 
 
-def make_image(prompt, seed, path):
-    url = ("https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt)
-           + f"?width={W}&height={H}&nologo=true&model=flux&seed={seed}")
-    for attempt in range(1, 5):
+def make_image(prompt, path):
+    for attempt in range(1, 6):
+        seed = random.randint(1, 999999)
+        url = ("https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt)
+               + f"?width={W}&height={H}&nologo=true&model=flux&seed={seed}")
         try:
             r = requests.get(url, timeout=240)
             if r.ok and r.headers.get("content-type", "").startswith("image"):
                 open(path, "wb").write(r.content)
                 return True
-        except requests.RequestException:
-            pass
+            print(f"  image try {attempt}: HTTP {r.status_code}")
+        except requests.RequestException as e:
+            print(f"  image try {attempt}: {e}")
         time.sleep(5 * attempt)
     return False
+
+
+def load_image(path):
+    img = Image.open(path).convert("RGB")
+    w, h = img.size
+    img = img.crop((0, 0, w, int(h * 0.94)))
+    return img.resize((W, H), Image.LANCZOS)
 
 
 async def make_voice(text, speaker, path):
@@ -170,7 +231,7 @@ def caption_layer(text, color, size=(W, H), font_size=120, y_frac=0.70,
 
 
 def make_thumbnails(img_path, text):
-    base = Image.open(img_path).convert("RGB").resize((W, H), Image.LANCZOS)
+    base = load_image(img_path)
 
     tall = base.convert("RGBA")
     tall.alpha_composite(caption_layer(text, (255, 225, 60), y_frac=0.78,
@@ -188,7 +249,7 @@ def make_thumbnails(img_path, text):
 
 
 def camera_clip(img_path, dur, caption_img):
-    img = Image.open(img_path).convert("RGB").resize((W, H), Image.LANCZOS)
+    img = load_image(img_path)
     z0, z1 = random.choice([(1.0, 1.2), (1.2, 1.0), (1.05, 1.25), (1.0, 1.12)])
     x0, y0 = random.uniform(0.3, 0.7), random.uniform(0.3, 0.7)
     x1, y1 = random.uniform(0.3, 0.7), random.uniform(0.3, 0.7)
@@ -213,16 +274,17 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     story = make_story()
     print("Title:", story["title"])
-    chars = story["characters"]
-    seed = random.randint(1, 99999)
 
     clips, prev_img, shot_imgs = [], None, []
     colors = [(255, 255, 255), (255, 225, 60), (255, 130, 200)]
+    failed = 0
 
     for i, shot in enumerate(story["shots"]):
         img = f"{OUT}/shot{i}.jpg"
-        ok = make_image(build_prompt(shot, chars), seed, img)
+        ok = make_image(build_prompt(shot), img)
         if not ok:
+            failed += 1
+            print(f"  WARNING: shot {i + 1} image failed, reusing the previous one")
             if prev_img is None:
                 raise RuntimeError("Image generation failed for the first shot")
             img = prev_img
@@ -245,6 +307,7 @@ def main():
         print(f"Shot {i + 1}/{len(story['shots'])} done")
         time.sleep(2)
 
+    print(f"Images that failed and were reused: {failed}")
     video = concatenate_videoclips(clips, method="compose")
 
     if os.path.exists("music.mp3"):
