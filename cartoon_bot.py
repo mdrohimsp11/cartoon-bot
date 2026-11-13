@@ -13,7 +13,7 @@ from moviepy.editor import (AudioFileClip, CompositeAudioClip, VideoClip,
 from PIL import Image, ImageDraw, ImageFont
 
 GEMINI_KEY = os.environ["GEMINI_API_KEY"]
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 OUT = "output"
 W, H = 1080, 1920
 FPS = 24
