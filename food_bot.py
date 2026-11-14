@@ -34,12 +34,10 @@ FOODS = [
     "sandesh", "steamed momos", "patishapta pitha", "puri with aloo sabzi",
 ]
 
-STYLE = ("ultra-photorealistic cinematic macro photograph of a miniature world, "
-         "a gigantic food centerpiece, dozens of extremely tiny realistic adult Indian "
-         "workers who look like real humans (not toys, not dolls, not cartoons), "
-         "premium macro cinema lens, extremely shallow depth of field, soft natural "
-         "lighting, steam and warm highlights, realistic textures, vertical 9:16, "
-         "no text, no watermark")
+STYLE = ("photorealistic macro photo, extremely shallow depth of field, warm soft light, "
+         "tiny realistic Indian adult workers (real humans, not toys, not dolls, not cartoon) "
+         "standing on and around the gigantic food, the food is a mountain compared with them, "
+         "no real human hands, no text, no watermark")
 
 PROMPT = """You plan a satisfying 3-minute "miniature world" cooking video.
 Concept: an entire tiny Indian community is making ONE gigantic portion of {food}.
@@ -72,8 +70,10 @@ Return ONLY JSON with this exact shape:
 }}
 Rules:
 - Exactly 12 stages in the real traditional order. The last stage is serving the finished giant {food}.
-- Exactly 3 shots per stage. Every shot looks different (wide, close-up, low angle, high angle).
-- Each shot describes the same gigantic food and the same miniature setting, so the video feels like one world.
+- Exactly 3 shots per stage. Every shot is a CLOSE-UP or MEDIUM CLOSE-UP (low angle, side angle or top-down close view). Never a wide, aerial or landscape view.
+- In every shot the giant food, giant ingredient or giant vessel FILLS most of the frame, and only 2 to 4 tiny workers are visible, standing on it, climbing it, or working with giant tools.
+- Never show a real human hand or a full-size person. Never show mountains, forests or towns as the main subject.
+- Each shot names the gigantic food or ingredient being worked on (for example "a gigantic gulab jamun dough ball"), so the picture always shows it.
 - Workers are adults in culturally appropriate Indian work clothing, with different poses and tasks.
 - Do not describe text, signs or logos.
 - Wholesome and safe for all ages.
@@ -114,6 +114,7 @@ def make_story(food):
 
 
 def plan_shots(story):
+    """Flatten stages into a list of shots."""
     shots = []
     n = len(story["stages"])
     for si, stage in enumerate(story["stages"]):
@@ -140,8 +141,9 @@ def pick_reel_indexes(shots, count=9):
 
 
 def build_prompt(shot, story):
-    return (f"{shot['scene']}. The gigantic dish: {story.get('food', '')}. "
-            f"Setting: {story.get('environment', '')}. {STYLE}")
+    food = story.get("food", "")
+    return (f"Close-up macro photo of a gigantic {food} with tiny workers on it. "
+            f"{shot['scene']}. {STYLE}")
 
 
 def make_image(prompt, path):
@@ -223,8 +225,8 @@ def make_thumbnails(img_path, text):
     bg.paste(fg, ((1280 - 405) // 2, 0))
     wide = bg.convert("RGBA")
     wide.alpha_composite(caption_layer(text, (255, 225, 60), size=(1280, 720),
-                                       font_size=100, y_frac=0.80,
-                                       line_h=115, stroke=10))
+                                       font_size=84, y_frac=0.70,
+                                       line_h=96, stroke=9))
     wide.convert("RGB").save(f"{OUT}/thumbnail_wide.jpg", quality=92)
 
 
@@ -239,6 +241,7 @@ VIGNETTE = make_vignette()
 
 
 def camera_clip(img_path, dur, label_img):
+    """Slow cinematic push-in or pull-out, soft flicker, vignette and quick fades."""
     img = load_image(img_path)
     z0, z1 = random.choice([(1.0, 1.14), (1.14, 1.0), (1.03, 1.16), (1.0, 1.1)])
     x0, y0 = random.uniform(0.35, 0.65), random.uniform(0.35, 0.65)
