@@ -1,0 +1,43 @@
+name: Make food video
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      food:
+        description: "Dish name (leave empty for today's automatic dish)"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Make food video
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FOOD_NAME: ${{ github.event.inputs.food }}
+        run: python food_bot.py
+
+      - name: Save videos
+        uses: actions/upload-artifact@v4
+        with:
+          name: food-video
+          path: |
+            output_food/video_full.mp4
+            output_food/video_reel.mp4
+            output_food/thumbnail.jpg
+            output_food/thumbnail_wide.jpg
+            output_food/meta.json
+          retention-days: 7
