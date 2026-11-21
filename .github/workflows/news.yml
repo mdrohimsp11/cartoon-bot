@@ -42,7 +42,7 @@ jobs:
           FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           PUBLISH: ${{ github.event.inputs.publish }}
-          MAX_NEWS: "2"
+          MAX_NEWS: "4"
         run: python news_bot.py
 
       - name: Remember posted news
