@@ -49,6 +49,17 @@ FEEDS = [
 ]
 
 AL_WORDS = ("আওয়ামী", "আওয়ামি", "awami")
+MAX_POLITICAL = int(os.environ.get("MAX_POLITICAL") or 2)   # party-politics stories per run
+POLITICS = ("বিএনপি", "আওয়ামী", "আ.লীগ", "ছাত্রদল", "যুবদল", "যুবলীগ", "ছাত্রলীগ", "জামায়াত",
+            "এনসিপি", "শিবির", "সংঘর্ষ", "হামলা", "মিছিল", "হরতাল", "রাজনীতি", "নেতাকর্মী")
+
+
+def same_story(a, b):
+    sa = {w.strip("।,.:;-'\"‘’?!") for w in a.split()}
+    sb = {w.strip("।,.:;-'\"‘’?!") for w in b.split()}
+    return len(sa & sb) / max(1, len(sa | sb)) >= 0.35
+
+
 AL_CONTEXT = ("উল্লেখ্য, অন্তর্বর্তী সরকার দলটির কার্যক্রমের ওপর নিষেধাজ্ঞা জারি করেছে; "
               "দলটি ও তার সমর্থকরা এই সিদ্ধান্তকে অবৈধ বলছেন।")
 
@@ -65,6 +76,7 @@ PROMPT = """তুমি একটি বাংলা সংবাদ পেজ�
 - কোনো দলের আইনি অবস্থা সম্পর্কে নিজের মতামত দেবে না। সূত্রে থাকলে "সূত্রের বক্তব্য অনুযায়ী" ধরনে দাবির উৎস উল্লেখ করো।
 - বিবরণে একাধিক আলাদা খবর (সংক্ষিপ্ত খবরের তালিকা) থাকলে শুধু শিরোনামের খবর নিয়ে লেখো, অন্য খবরের কোনো তথ্য মেশাবে না।
 - কোনো ব্যক্তি বা দলের অভিযোগ, দাবি বা মন্তব্য হলে শিরোনামে ও পয়েন্টে তার নাম উল্লেখ করে লেখো (যেমন "…বলেছেন অমুক"); অভিযোগকে নিজের কণ্ঠে সত্য হিসেবে লিখবে না।
+- আওয়ামী লীগ বা তার সহযোগী সংগঠনকে নিজের কণ্ঠে কখনো "নিষিদ্ধ", "বেআইনি" বা "কার্যক্রম নিষিদ্ধ" বলবে না; শুধু "আওয়ামী লীগ" লিখবে। নিষেধাজ্ঞার কথা সূত্রে থাকলেও শিরোনামে আনবে না।
 - মতামত, বিশ্লেষণ বা ব্যাখ্যামূলক লেখা (খবর নয়) হলে skip=true দাও।
 - image_prompt: ইংরেজিতে ১ লাইনে খবরের বিষয়ের একটি প্রতীকী ছবির বর্ণনা (যেমন "factory workers silhouette at sunrise, illustration"). কোনো আসল ব্যক্তি, মুখ, নেতা, লেখা বা লোগো থাকবে না। সাধারণ খবরে (খেলা, অর্থনীতি, শিক্ষা, স্বাস্থ্য, আবহাওয়া, বিনোদন, প্রযুক্তি ইত্যাদি) image_prompt অবশ্যই লিখবে। শুধু রাজনীতি, দল, সহিংসতা, অপরাধ, ধর্মীয় রায় বা সংবেদনশীল খবরে খালি ("") রাখবে।
 - তথ্য খুব কম হলে, অথবা এটি খবর না হয়ে বিজ্ঞাপন বা আড্ডার লেখা হলে skip=true দাও।
@@ -135,6 +147,14 @@ def fetch_items(seen):
     return items
 
 
+def neutral(text):
+    """Never call the party banned in our own voice; spell out the full name."""
+    t = re.sub(r"আ\.\s*লীগ", "আওয়ামী লীগ", text or "")
+    t = re.sub(r"কার্যক্রম\s*নিষিদ্ধ\s*(আওয়ামী লীগ|ছাত্রলীগ|যুবলীগ)", r"\1", t)
+    t = re.sub(r"(?:নিষিদ্ধ|নিষিদ্ধঘোষিত|বেআইনি)\s*(আওয়ামী লীগ|ছাত্রলীগ|যুবলীগ)", r"\1", t)
+    return t
+
+
 def write_post(item):
     body = {"contents": [{"parts": [{"text": PROMPT.format(
         source=item["source"], title=item["title"], desc=item["desc"][:1500] or "(নেই)")}]}],
@@ -151,6 +171,9 @@ def write_post(item):
                 if data.get("skip"):
                     return None
                 assert data["headline"] and data["points"] and data["post_text"]
+                data["headline"] = neutral(data["headline"])
+                data["post_text"] = neutral(data["post_text"])
+                data["points"] = [neutral(p) for p in data["points"]]
                 return data
             except Exception as e:
                 last = e
@@ -611,12 +634,22 @@ def main():
 
     # --- news ---
     news_count, reels_made = 0, 0
+    political_count, done_titles = 0, []
     items = [] if stopped else fetch_items(seen)
     print(f"{len(items)} new news items found")
     for item in items:
         if news_count >= MAX_NEWS:
             break
         print("-", item["source"], "|", item["title"][:70])
+        raw = item["title"] + " " + item["desc"][:400]
+        pol = any(k in raw for k in POLITICS)
+        if pol and political_count >= MAX_POLITICAL:
+            print("  skipped for now: too many political stories in this run")
+            continue
+        if any(same_story(item["title"], t) for t in done_titles):
+            print("  skipped: same story as one already prepared")
+            seen.add(key_of(item["link"]))
+            continue
         data = write_post(item)
         time.sleep(6)
         if not data:
@@ -631,6 +664,14 @@ def main():
             text += f"\n\n{AL_CONTEXT}"
         text += f"\n\nসূত্র: {item['source']}\n{item['link']}\n\n{tags}"
 
+        if any(same_story(data["headline"], t) for t in done_titles):
+            print("  skipped: same story as one already prepared")
+            seen.add(key_of(item["link"]))
+            continue
+        done_titles.append(item["title"])
+        done_titles.append(data["headline"])
+        if pol or is_al:
+            political_count += 1
         news_count += 1
         n = news_count
         card = f"{OUT}/news{n}.jpg"
