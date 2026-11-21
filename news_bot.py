@@ -66,6 +66,7 @@ PROMPT = """তুমি একটি বাংলা সংবাদ পেজ�
 - বিবরণে একাধিক আলাদা খবর (সংক্ষিপ্ত খবরের তালিকা) থাকলে শুধু শিরোনামের খবর নিয়ে লেখো, অন্য খবরের কোনো তথ্য মেশাবে না।
 - কোনো ব্যক্তি বা দলের অভিযোগ, দাবি বা মন্তব্য হলে শিরোনামে ও পয়েন্টে তার নাম উল্লেখ করে লেখো (যেমন "…বলেছেন অমুক"); অভিযোগকে নিজের কণ্ঠে সত্য হিসেবে লিখবে না।
 - মতামত, বিশ্লেষণ বা ব্যাখ্যামূলক লেখা (খবর নয়) হলে skip=true দাও।
+- image_prompt: ইংরেজিতে ১ লাইনে খবরের বিষয়ের একটি প্রতীকী ছবির বর্ণনা (যেমন "factory workers silhouette at sunrise, illustration"). কোনো আসল ব্যক্তি, মুখ, নেতা, লেখা বা লোগো থাকবে না। রাজনীতি, দল, সহিংসতা, অপরাধ, ধর্মীয় রায় বা সংবেদনশীল খবরে image_prompt খালি ("") রাখো।
 - তথ্য খুব কম হলে, অথবা এটি খবর না হয়ে বিজ্ঞাপন বা আড্ডার লেখা হলে skip=true দাও।
 
 শুধু JSON দাও:
@@ -74,7 +75,8 @@ PROMPT = """তুমি একটি বাংলা সংবাদ পেজ�
   "headline": "সর্বোচ্চ ৭০ অক্ষরের শিরোনাম",
   "points": ["প্রথম তথ্য, সর্বোচ্চ ২০ শব্দ", "দ্বিতীয় তথ্য", "তৃতীয় তথ্য (থাকলে)"],
   "post_text": "ফেসবুক পোস্টের মূল লেখা, ২-৪ বাক্য",
-  "hashtags": ["#খবর", "#বাংলাদেশ"]
+  "hashtags": ["#খবর", "#বাংলাদেশ"],
+  "image_prompt": ""
 }}"""
 
 
@@ -234,8 +236,59 @@ def gradient(w, h):
     return img
 
 
-def base_card(w, h):
+def make_bg(prompt, path, size=(1080, 1920)):
+    """Try to make a symbolic AI picture. Returns the path or None (cards then stay plain)."""
+    import base64
+    import io
+    from urllib.parse import quote
+    prompt = (prompt or "").strip()
+    if not prompt or os.environ.get("NO_IMAGES") == "yes":
+        return None
+    full = prompt + ", symbolic illustration, no text, no letters, no logos, no real people, no faces"
+    img = None
+    for model in ("gemini-2.5-flash-image", "gemini-2.0-flash-preview-image-generation"):
+        try:
+            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+                   f"{model}:generateContent?key={GEMINI_KEY}")
+            body = {"contents": [{"parts": [{"text": full}]}],
+                    "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
+            r = requests.post(url, json=body, timeout=90)
+            r.raise_for_status()
+            for part in r.json()["candidates"][0]["content"]["parts"]:
+                inline = part.get("inlineData") or part.get("inline_data")
+                if inline:
+                    img = Image.open(io.BytesIO(base64.b64decode(inline["data"]))).convert("RGB")
+                    break
+            if img:
+                break
+        except Exception as e:
+            print(f"  image via {model} failed: {str(e)[:120]}")
+    if img is None:
+        try:
+            r = requests.get("https://image.pollinations.ai/prompt/" + quote(full) +
+                             "?width=1024&height=1024&nologo=true", timeout=90)
+            r.raise_for_status()
+            img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        except Exception as e:
+            print(f"  image via pollinations failed: {str(e)[:120]}")
+    if img is None or min(img.size) < 256:
+        return None
+    img.save(path, quality=92)
+    return path
+
+
+def base_card(w, h, bg=None):
     img = gradient(w, h)
+    if bg:
+        try:
+            pic = Image.open(bg).convert("RGB")
+            k = max(w / pic.width, h / pic.height)
+            pic = pic.resize((int(pic.width * k) + 1, int(pic.height * k) + 1))
+            x, y = (pic.width - w) // 2, (pic.height - h) // 2
+            pic = pic.crop((x, y, x + w, y + h))
+            img = Image.blend(pic, img, 0.70)   # dark enough for white text
+        except Exception as e:
+            print("  background skipped:", e)
     d = ImageDraw.Draw(img)
     d.rectangle([0, 0, w, 14], fill=(230, 60, 60))
     d.rectangle([60, 90, 300, 160], fill=(230, 60, 60))
@@ -243,9 +296,9 @@ def base_card(w, h):
     return img, d
 
 
-def feed_card(item, data, path):
+def feed_card(item, data, path, bg=None):
     w, h = 1080, 1350
-    img, d = base_card(w, h)
+    img, d = base_card(w, h, bg)
     y = draw_block(d, data["headline"], (70, 220, w - 70, 760), 84, 52, (255, 255, 255))
     y = max(y + 30, 700)
     for p in data["points"][:3]:
@@ -257,9 +310,9 @@ def feed_card(item, data, path):
     img.save(path, quality=92)
 
 
-def reel_slide(text, label, path, small=False):
+def reel_slide(text, label, path, small=False, bg=None):
     w, h = 1080, 1920
-    img, d = base_card(w, h)
+    img, d = base_card(w, h, bg)
     size = 70 if small else 92
     top = 640 if small else 420
     draw_block(d, text, (80, top, w - 80, 1500), size, 44, (255, 255, 255), center=True)
@@ -581,17 +634,21 @@ def main():
         news_count += 1
         n = news_count
         card = f"{OUT}/news{n}.jpg"
-        feed_card(item, data, card)
-
         work = f"{OUT}/work_news{n}"
         os.makedirs(work, exist_ok=True)
+        bg = None
+        if not is_al:   # no generated pictures for party/political stories
+            bg = make_bg(data.get("image_prompt"), f"{work}/bg.jpg")
+            if bg:
+                text += "\n\n(ছবিটি প্রতীকী, এআই-নির্মিত)"
+        feed_card(item, data, card, bg)
         slides = []
         p0 = f"{work}/s0.jpg"
-        reel_slide(data["headline"], "সূত্র: " + item["source"], p0)
+        reel_slide(data["headline"], "সূত্র: " + item["source"], p0, bg=bg)
         slides.append((p0, data["headline"]))
         for j, pt in enumerate(data["points"][:3], start=1):
             pj = f"{work}/s{j}.jpg"
-            reel_slide(pt, "", pj, small=True)
+            reel_slide(pt, "", pj, small=True, bg=bg)
             slides.append((pj, pt))
         if is_al:
             pj = f"{work}/s_ctx.jpg"
