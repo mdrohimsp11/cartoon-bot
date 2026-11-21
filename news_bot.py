@@ -78,7 +78,7 @@ PROMPT = """তুমি একটি বাংলা সংবাদ পেজ�
 - কোনো ব্যক্তি বা দলের অভিযোগ, দাবি বা মন্তব্য হলে শিরোনামে ও পয়েন্টে তার নাম উল্লেখ করে লেখো (যেমন "…বলেছেন অমুক"); অভিযোগকে নিজের কণ্ঠে সত্য হিসেবে লিখবে না।
 - আওয়ামী লীগ বা তার সহযোগী সংগঠনকে নিজের কণ্ঠে কখনো "নিষিদ্ধ", "বেআইনি" বা "কার্যক্রম নিষিদ্ধ" বলবে না; শুধু "আওয়ামী লীগ" লিখবে। নিষেধাজ্ঞার কথা সূত্রে থাকলেও শিরোনামে আনবে না।
 - মতামত, বিশ্লেষণ বা ব্যাখ্যামূলক লেখা (খবর নয়) হলে skip=true দাও।
-- image_prompt: ইংরেজিতে ১ লাইনে খবরের বিষয়ের একটি প্রতীকী ছবির বর্ণনা (যেমন "factory workers silhouette at sunrise, illustration"). কোনো আসল ব্যক্তি, মুখ, নেতা, লেখা বা লোগো থাকবে না। সাধারণ খবরে (খেলা, অর্থনীতি, শিক্ষা, স্বাস্থ্য, আবহাওয়া, বিনোদন, প্রযুক্তি ইত্যাদি) image_prompt অবশ্যই লিখবে। শুধু রাজনীতি, দল, সহিংসতা, অপরাধ, ধর্মীয় রায় বা সংবেদনশীল খবরে খালি ("") রাখবে।
+- theme: খবরের বিষয়ের জন্য ঠিক একটি শব্দ বেছে নাও: sports, money, health, education, weather, tech, entertainment, world, general। রাজনীতি, দল, সহিংসতা, অপরাধ, দুর্ঘটনা, ধর্মীয় রায় বা সংবেদনশীল খবরে theme খালি ("") রাখো।
 - তথ্য খুব কম হলে, অথবা এটি খবর না হয়ে বিজ্ঞাপন বা আড্ডার লেখা হলে skip=true দাও।
 
 শুধু JSON দাও:
@@ -88,7 +88,7 @@ PROMPT = """তুমি একটি বাংলা সংবাদ পেজ�
   "points": ["প্রথম তথ্য, সর্বোচ্চ ২০ শব্দ", "দ্বিতীয় তথ্য", "তৃতীয় তথ্য (থাকলে)"],
   "post_text": "ফেসবুক পোস্টের মূল লেখা, ২-৪ বাক্য",
   "hashtags": ["#খবর", "#বাংলাদেশ"],
-  "image_prompt": "ইংরেজি বর্ণনা, অথবা সংবেদনশীল হলে খালি"
+  "theme": "general"
 }}"""
 
 
@@ -259,43 +259,88 @@ def gradient(w, h):
     return img
 
 
-def make_bg(prompt, path, size=(1080, 1920)):
-    """Try to make a symbolic AI picture. Returns the path or None (cards then stay plain)."""
-    import base64
-    import io
-    from urllib.parse import quote
-    prompt = (prompt or "").strip()
-    if not prompt or os.environ.get("NO_IMAGES") == "yes":
+THEMES = {
+    "sports": ((22, 130, 80), (8, 48, 42), "circles"),
+    "money": ((205, 150, 35), (72, 48, 10), "coins"),
+    "health": ((25, 150, 160), (8, 50, 72), "cross"),
+    "education": ((80, 80, 180), (22, 22, 72), "lines"),
+    "weather": ((70, 140, 210), (15, 42, 95), "waves"),
+    "tech": ((110, 70, 190), (26, 16, 72), "grid"),
+    "entertainment": ((200, 65, 125), (62, 16, 52), "stars"),
+    "world": ((35, 105, 170), (10, 30, 72), "globe"),
+    "general": ((70, 100, 150), (16, 26, 58), "circles"),
+}
+
+
+def make_bg(theme, path, seed=""):
+    """Offline themed background (no web service needed). Returns the path, or None for
+    sensitive stories (politics, violence, crime, religion) so those stay plain."""
+    import random
+    theme = (theme or "").strip().lower()
+    if not theme or os.environ.get("NO_IMAGES") == "yes":
         return None
-    full = prompt + ", symbolic illustration, no text, no letters, no logos, no real people, no faces"
-    img = None
-    for model in ("gemini-2.5-flash-image", "gemini-2.0-flash-preview-image-generation"):
-        try:
-            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   f"{model}:generateContent?key={GEMINI_KEY}")
-            body = {"contents": [{"parts": [{"text": full}]}],
-                    "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
-            r = requests.post(url, json=body, timeout=90)
-            r.raise_for_status()
-            for part in r.json()["candidates"][0]["content"]["parts"]:
-                inline = part.get("inlineData") or part.get("inline_data")
-                if inline:
-                    img = Image.open(io.BytesIO(base64.b64decode(inline["data"]))).convert("RGB")
-                    break
-            if img:
-                break
-        except Exception as e:
-            print(f"  image via {model} failed: {str(e)[:120]}")
-    if img is None:
-        try:
-            r = requests.get("https://image.pollinations.ai/prompt/" + quote(full) +
-                             "?width=1024&height=1024&nologo=true", timeout=90)
-            r.raise_for_status()
-            img = Image.open(io.BytesIO(r.content)).convert("RGB")
-        except Exception as e:
-            print(f"  image via pollinations failed: {str(e)[:120]}")
-    if img is None or min(img.size) < 256:
-        return None
+    c1, c2, kind = THEMES.get(theme, THEMES["general"])
+    w, h = 1080, 1920
+    rnd = random.Random(seed or theme)
+    img = Image.new("RGB", (w, h))
+    px = ImageDraw.Draw(img)
+    for yy in range(h):
+        t = yy / h
+        px.line([(0, yy), (w, yy)], fill=tuple(int(c1[k] * (1 - t) + c2[k] * t) for k in range(3)))
+    ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    white = lambda a: (255, 255, 255, a)
+    if kind == "circles":
+        for _ in range(14):
+            r = rnd.randint(90, 330)
+            x, y = rnd.randint(0, w), rnd.randint(0, h)
+            d.ellipse([x - r, y - r, x + r, y + r], outline=white(70), width=rnd.randint(6, 16))
+    elif kind == "coins":
+        for _ in range(16):
+            r = rnd.randint(60, 190)
+            x, y = rnd.randint(0, w), rnd.randint(0, h)
+            d.ellipse([x - r, y - r, x + r, y + r], fill=white(34), outline=white(90), width=8)
+            d.ellipse([x - r // 2, y - r // 2, x + r // 2, y + r // 2], outline=white(70), width=5)
+    elif kind == "cross":
+        for _ in range(12):
+            a = rnd.randint(60, 170)
+            x, y = rnd.randint(0, w), rnd.randint(0, h)
+            d.rectangle([x - a, y - a // 3, x + a, y + a // 3], fill=white(40))
+            d.rectangle([x - a // 3, y - a, x + a // 3, y + a], fill=white(40))
+    elif kind == "lines":
+        for k in range(-h, w, 90):
+            d.line([(k, 0), (k + h, h)], fill=white(34), width=26)
+    elif kind == "waves":
+        import math
+        for row in range(10):
+            y0 = 160 + row * 190
+            pts = [(x, y0 + 40 * math.sin(x / 70 + row)) for x in range(0, w + 20, 20)]
+            d.line(pts, fill=white(70), width=10)
+    elif kind == "grid":
+        for k in range(0, w, 120):
+            d.line([(k, 0), (k, h)], fill=white(30), width=4)
+        for k in range(0, h, 120):
+            d.line([(0, k), (w, k)], fill=white(30), width=4)
+        for _ in range(26):
+            x, y = rnd.randrange(0, w, 120), rnd.randrange(0, h, 120)
+            d.ellipse([x - 14, y - 14, x + 14, y + 14], fill=white(110))
+    elif kind == "stars":
+        import math
+        for _ in range(16):
+            x, y, r = rnd.randint(0, w), rnd.randint(0, h), rnd.randint(50, 150)
+            pts = []
+            for k in range(10):
+                rr = r if k % 2 == 0 else r * 0.45
+                ang = math.pi / 5 * k - math.pi / 2
+                pts.append((x + rr * math.cos(ang), y + rr * math.sin(ang)))
+            d.polygon(pts, fill=white(42))
+    elif kind == "globe":
+        cx, cy = w // 2, h // 2
+        for r in range(160, 1000, 130):
+            d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=white(55), width=6)
+        for k in range(-3, 4):
+            d.ellipse([cx - abs(k) * 120 - 40, cy - 900, cx + abs(k) * 120 + 40, cy + 900], outline=white(40), width=4)
+    img = Image.alpha_composite(img.convert("RGBA"), ov).convert("RGB")
     img.save(path, quality=92)
     return path
 
@@ -309,7 +354,7 @@ def base_card(w, h, bg=None):
             pic = pic.resize((int(pic.width * k) + 1, int(pic.height * k) + 1))
             x, y = (pic.width - w) // 2, (pic.height - h) // 2
             pic = pic.crop((x, y, x + w, y + h))
-            img = Image.blend(pic, img, 0.70)   # dark enough for white text
+            img = Image.blend(pic, img, 0.55)   # dark enough for white text
         except Exception as e:
             print("  background skipped:", e)
     d = ImageDraw.Draw(img)
@@ -679,9 +724,7 @@ def main():
         os.makedirs(work, exist_ok=True)
         bg = None
         if not is_al:   # no generated pictures for party/political stories
-            bg = make_bg(data.get("image_prompt"), f"{work}/bg.jpg")
-            if bg:
-                text += "\n\n(ছবিটি প্রতীকী, এআই-নির্মিত)"
+            bg = make_bg(data.get("theme"), f"{work}/bg.jpg", data["headline"])
         feed_card(item, data, card, bg)
         slides = []
         p0 = f"{work}/s0.jpg"
