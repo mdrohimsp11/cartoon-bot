@@ -2,7 +2,7 @@ name: Bangla news
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "5 22,4,10,16 * * *"
   workflow_dispatch:
     inputs:
       publish:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +42,7 @@ jobs:
           FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           PUBLISH: ${{ github.event.inputs.publish }}
+          MAX_NEWS: "2"
         run: python news_bot.py
 
       - name: Remember posted news
