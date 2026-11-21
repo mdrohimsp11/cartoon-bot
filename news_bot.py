@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta, timezone
 from html import unescape
+from zoneinfo import ZoneInfo
 
 import requests
 from PIL import Image, ImageDraw, ImageFont, features
@@ -32,8 +33,8 @@ GRAPH = "https://graph.facebook.com"
 
 OUT = "news_out"
 STATE = "posted.json"
-MAX_NEWS = int(os.environ.get("MAX_NEWS") or 5)
-MAX_REELS = int(os.environ.get("MAX_REELS") or 2)
+MAX_NEWS = int(os.environ.get("MAX_NEWS") or 6)
+MAX_REELS = int(os.environ.get("MAX_REELS") or 99)
 MAX_AGE_HOURS = 30
 VOICE = "bn-BD-NabanitaNeural"
 
@@ -340,9 +341,183 @@ def post_reel(video_path, text):
 
 
 def publish_enabled():
-    if (os.environ.get("PUBLISH") or "").strip().lower() == "yes":
+    p = (os.environ.get("PUBLISH") or "").strip().lower()
+    if p == "yes":
         return True
-    return os.path.exists("auto_post_on.txt")
+    if p == "no":          # a manual run left on "no" is always a safe test
+        return False
+    return os.path.exists("auto_post_on.txt")   # scheduled runs
+
+
+# ---------- daily special posts: date, prayer times, gold ----------
+BN_DIGITS = str.maketrans("0123456789", "০১২৩৪৫৬৭৮৯")
+BN_DAYS = ["সোমবার", "মঙ্গলবার", "বুধবার", "বৃহস্পতিবার", "শুক্রবার", "শনিবার", "রবিবার"]
+BN_MONTHS = ["জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই",
+             "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"]
+HIJRI_MONTHS = ["মুহাররম", "সফর", "রবিউল আউয়াল", "রবিউস সানি", "জমাদিউল আউয়াল",
+                "জমাদিউস সানি", "রজব", "শাবান", "রমজান", "শাওয়াল", "জিলকদ", "জিলহজ"]
+DHAKA = ZoneInfo("Asia/Dhaka")
+BHORI_GRAMS = 11.664
+TROY_OUNCE = 31.1035
+
+
+def bn(x):
+    return str(x).translate(BN_DIGITS)
+
+
+def money(x):
+    s = str(int(round(x)))
+    if len(s) > 3:
+        s = re.sub(r"(\d)(?=(\d\d)+$)", r"\1,", s[:-3]) + "," + s[-3:]
+    return bn(s)
+
+
+def to_12h(hhmm):
+    h, m = int(hhmm[:2]), int(hhmm[3:5])
+    if 3 <= h < 6:
+        word = "ভোর"
+    elif 6 <= h < 11:
+        word = "সকাল"
+    elif 11 <= h < 15:
+        word = "দুপুর"
+    elif 15 <= h < 17:
+        word = "বিকাল"
+    elif 17 <= h < 20:
+        word = "সন্ধ্যা"
+    else:
+        word = "রাত"
+    h12 = h % 12 or 12
+    return f"{word} {bn(h12)}:{bn(f'{m:02d}')}"
+
+
+def fetch_prayer(now):
+    url = ("https://api.aladhan.com/v1/timingsByCity?city=Dhaka&country=Bangladesh"
+           "&method=1&school=1")
+    r = requests.get(url, timeout=30)
+    r.raise_for_status()
+    data = r.json()["data"]
+    t = data["timings"]
+    hij = data["date"]["hijri"]
+    names = [("ফজর", "Fajr"), ("সূর্যোদয়", "Sunrise"), ("জোহর", "Dhuhr"),
+             ("আসর", "Asr"), ("মাগরিব", "Maghrib"), ("এশা", "Isha")]
+    rows = [(bn_name, to_12h(t[key][:5])) for bn_name, key in names]
+    date_line = f"{BN_DAYS[now.weekday()]}, {bn(now.day)} {BN_MONTHS[now.month - 1]} {bn(now.year)}"
+    hijri_line = (f"{bn(int(hij['day']))} {HIJRI_MONTHS[int(hij['month']['number']) - 1]} "
+                  f"{bn(hij['year'])} হিজরি")
+    return {"date_line": date_line, "hijri_line": hijri_line, "rows": rows}
+
+
+def fetch_gold():
+    g = requests.get("https://api.gold-api.com/price/XAU", timeout=30)
+    g.raise_for_status()
+    usd_oz = float(g.json()["price"])
+    f = requests.get("https://open.er-api.com/v6/latest/USD", timeout=30)
+    f.raise_for_status()
+    bdt = float(f.json()["rates"]["BDT"])
+    if not (500 < usd_oz < 20000 and 50 < bdt < 400):
+        raise ValueError(f"Unreasonable gold/FX numbers: {usd_oz}, {bdt}")
+    per_gram_24 = usd_oz / TROY_OUNCE * bdt
+    rows = []
+    for label, karat in (("২৪ ক্যারেট", 24), ("২২ ক্যারেট", 22), ("২১ ক্যারেট", 21), ("১৮ ক্যারেট", 18)):
+        rows.append((label, "৳ " + money(per_gram_24 * karat / 24 * BHORI_GRAMS)))
+    return {"rows": rows, "usd_oz": usd_oz, "bdt": bdt}
+
+
+def table_card(title, subtitle, rows, footer, path):
+    w, h = 1080, 1350
+    img, d = base_card(w, h)
+    y = draw_block(d, title, (70, 210, w - 70, 480), 78, 50, (255, 255, 255))
+    if subtitle:
+        y = draw_block(d, subtitle, (70, y + 5, w - 70, y + 140), 44, 32, (255, 210, 90)) + 10
+    y = max(y + 20, 470)
+    for label, value in rows:
+        d.rectangle([60, y, w - 60, y + 84], fill=(22, 44, 82))
+        d.text((90, y + 8), label, font=font(50), fill=(255, 255, 255))
+        vw = d.textlength(value, font=font(50))
+        d.text((w - 90 - vw, y + 8), value, font=font(50), fill=(255, 210, 90))
+        y += 96
+    draw_block(d, footer, (70, 1120, w - 70, 1300), 32, 26, (170, 190, 220), spacing=1.4)
+    img.save(path, quality=92)
+
+
+def prayer_package(now, work_dir, out_dir):
+    info = fetch_prayer(now)
+    card = f"{out_dir}/prayer.jpg"
+    foot = "ঢাকার সময় অনুযায়ী। অন্যান্য জেলায় কয়েক মিনিট আগে-পরে হতে পারে। হিজরি তারিখ চাঁদ দেখার ওপর নির্ভর করে।"
+    table_card("আজকের নামাজের সময়সূচি", info["date_line"] + " | " + info["hijri_line"],
+               info["rows"], foot, card)
+    lines = [f"{lab}: {val}" for lab, val in info["rows"]]
+    text = ("আজকের নামাজের সময়সূচি (ঢাকা)\n\n"
+            f"{info['date_line']} | {info['hijri_line']}\n\n" + "\n".join(lines) +
+            "\n\nঅন্যান্য জেলায় কয়েক মিনিট আগে-পরে হতে পারে।\n\n#নামাজ #আজান #সময়সূচি #বাংলাদেশ")
+    slides = []
+    p0 = f"{work_dir}/p0.jpg"
+    reel_slide("আজকের নামাজের সময়সূচি\n" + info["date_line"], "ঢাকা", p0)
+    slides.append((p0, "আজকের নামাজের সময়সূচি। " + info["date_line"] + "। " + info["hijri_line"]))
+    for i, (lab, val) in enumerate(info["rows"], start=1):
+        pi = f"{work_dir}/p{i}.jpg"
+        reel_slide(f"{lab}\n{val}", "", pi)
+        slides.append((pi, f"{lab}, {val}"))
+    pe = f"{work_dir}/p_end.jpg"
+    reel_slide("অন্যান্য জেলায় কয়েক মিনিট আগে-পরে হতে পারে। পেজটি ফলো করুন।", "", pe, small=True)
+    slides.append((pe, "অন্যান্য জেলায় কয়েক মিনিট আগে পরে হতে পারে। পেজটি ফলো করুন।"))
+    return {"title": "নামাজের সময়সূচি", "text": text, "card": card, "slides": slides}
+
+
+def gold_package(now, work_dir, out_dir):
+    info = fetch_gold()
+    card = f"{out_dir}/gold.jpg"
+    date_line = f"{BN_DAYS[now.weekday()]}, {bn(now.day)} {BN_MONTHS[now.month - 1]} {bn(now.year)}"
+    foot = (f"আন্তর্জাতিক বাজারদর (প্রতি আউন্স ${money(info['usd_oz'])}) ও ডলারের হার (১ ডলার = ৳{bn(round(info['bdt'], 2))}) "
+            "থেকে হিসাব করা আনুমানিক দাম। বাজুসের ঘোষিত দাম ভিন্ন হতে পারে।")
+    table_card("আজকের সোনার আনুমানিক দাম", date_line + " | প্রতি ভরি", info["rows"], foot, card)
+    lines = [f"{lab}: {val}" for lab, val in info["rows"]]
+    text = ("আজকের সোনার আনুমানিক দাম (প্রতি ভরি)\n\n" + date_line + "\n\n" + "\n".join(lines) +
+            "\n\n" + foot + "\n\n#সোনার_দাম #স্বর্ণ #বাংলাদেশ")
+    slides = []
+    p0 = f"{work_dir}/g0.jpg"
+    reel_slide("আজকের সোনার আনুমানিক দাম\nপ্রতি ভরি", date_line, p0)
+    slides.append((p0, "আজকের সোনার আনুমানিক দাম, প্রতি ভরি। " + date_line))
+    for i, (lab, val) in enumerate(info["rows"], start=1):
+        pi = f"{work_dir}/g{i}.jpg"
+        reel_slide(f"{lab}\n{val}", "", pi)
+        slides.append((pi, f"{lab}, {val.replace('৳', '')} টাকা"))
+    pe = f"{work_dir}/g_end.jpg"
+    reel_slide("আন্তর্জাতিক বাজারদরের ভিত্তিতে আনুমানিক দাম। বাজুসের দাম ভিন্ন হতে পারে।", "", pe, small=True)
+    slides.append((pe, "এটি আন্তর্জাতিক বাজারদরের ভিত্তিতে আনুমানিক দাম। বাজুসের ঘোষিত দাম ভিন্ন হতে পারে।"))
+    return {"title": "সোনার দাম", "text": text, "card": card, "slides": slides}
+
+
+def finish_item(rec, tag, live, seen, key):
+    """Make the reel, optionally post, and record the result. Returns False if Facebook stopped us."""
+    reel_path = None
+    if rec.get("slides") and rec.pop("want_reel", True):
+        try:
+            work = f"{OUT}/work_{tag}"
+            os.makedirs(work, exist_ok=True)
+            reel_path = f"{OUT}/reel_{tag}.mp4"
+            rec["reel_seconds"] = round(make_reel(rec["slides"], reel_path, work))
+            rec["reel"] = reel_path
+        except Exception as e:
+            print("  Reel failed:", e)
+            reel_path = None
+    rec.pop("slides", None)
+    if live:
+        try:
+            post_photo(rec["card"], rec["text"])
+            print("  posted card")
+            if reel_path:
+                post_reel(reel_path, rec["text"])
+                print("  posted reel")
+            seen.add(key)
+            save_state(seen)
+            rec["posted"] = True
+        except FBError as e:
+            print("  Facebook problem:", e)
+            rec["posted"] = False
+            return False
+        time.sleep(20)
+    return True
 
 
 def main():
@@ -353,11 +528,38 @@ def main():
     print("MODE:", "POSTING TO FACEBOOK" if live else "DRY RUN (nothing will be posted)")
 
     seen = load_state()
-    items = fetch_items(seen)
-    print(f"{len(items)} new items found")
-    results, reels_made = [], 0
+    now = datetime.now(DHAKA)
+    today = now.strftime("%Y-%m-%d")
+    results = []
+    stopped = False
+
+    # --- daily special posts (once per day, after 4 am Dhaka time) ---
+    if now.hour >= 4 or os.environ.get("FORCE_DAILY") == "yes":
+        for tag, builder in (("prayer", prayer_package), ("gold", gold_package)):
+            key = f"{tag}-{today}"
+            if key in seen:
+                print(f"{tag}: already posted today")
+                continue
+            try:
+                work = f"{OUT}/work_{tag}"
+                os.makedirs(work, exist_ok=True)
+                rec = builder(now, work, OUT)
+            except Exception as e:
+                print(f"{tag}: skipped, could not get data: {e}")
+                continue
+            print("-", rec["title"])
+            ok = finish_item(rec, tag, live, seen, key)
+            results.append(rec)
+            if not ok:
+                stopped = True
+                break
+
+    # --- news ---
+    news_count, reels_made = 0, 0
+    items = [] if stopped else fetch_items(seen)
+    print(f"{len(items)} new news items found")
     for item in items:
-        if len(results) >= MAX_NEWS:
+        if news_count >= MAX_NEWS:
             break
         print("-", item["source"], "|", item["title"][:70])
         data = write_post(item)
@@ -365,67 +567,51 @@ def main():
         if not data:
             seen.add(key_of(item["link"]))
             continue
-        is_al = any(w in (item["title"] + " " + item["desc"]).lower() for w in AL_WORDS)
+        blob = " ".join([item["title"], item["desc"], data["headline"], data["post_text"]]
+                        + list(data["points"])).lower()
+        is_al = any(w in blob for w in AL_WORDS)
         tags = " ".join(data.get("hashtags") or [])[:200]
         text = f"{data['headline']}\n\n{data['post_text']}"
         if is_al:
             text += f"\n\n{AL_CONTEXT}"
         text += f"\n\nসূত্র: {item['source']}\n{item['link']}\n\n{tags}"
 
-        n = len(results) + 1
+        news_count += 1
+        n = news_count
         card = f"{OUT}/news{n}.jpg"
         feed_card(item, data, card)
-        record = {"title": data["headline"], "source": item["source"], "link": item["link"],
-                  "text": text, "awami_league_related": is_al, "card": card}
 
-        reel_path = None
-        if reels_made < MAX_REELS:
-            try:
-                work = f"{OUT}/work{n}"
-                os.makedirs(work, exist_ok=True)
-                slides = []
-                p0 = f"{work}/s0.jpg"
-                reel_slide(data["headline"], "সূত্র: " + item["source"], p0)
-                slides.append((p0, data["headline"]))
-                for j, pt in enumerate(data["points"][:3], start=1):
-                    pj = f"{work}/s{j}.jpg"
-                    reel_slide(pt, "", pj, small=True)
-                    slides.append((pj, pt))
-                if is_al:
-                    pj = f"{work}/s_ctx.jpg"
-                    reel_slide(AL_CONTEXT, "", pj, small=True)
-                    slides.append((pj, AL_CONTEXT))
-                pe = f"{work}/s_end.jpg"
-                reel_slide("সূত্র: " + item["source"] + "। আরও খবরের জন্য পেজটি ফলো করুন।", "", pe, small=True)
-                slides.append((pe, "সূত্র " + item["source"] + "। আরও খবরের জন্য পেজটি ফলো করুন।"))
-                reel_path = f"{OUT}/reel{n}.mp4"
-                record["reel_seconds"] = round(make_reel(slides, reel_path, work))
-                record["reel"] = reel_path
-                reels_made += 1
-            except Exception as e:
-                print("  Reel failed:", e)
-                reel_path = None
+        work = f"{OUT}/work_news{n}"
+        os.makedirs(work, exist_ok=True)
+        slides = []
+        p0 = f"{work}/s0.jpg"
+        reel_slide(data["headline"], "সূত্র: " + item["source"], p0)
+        slides.append((p0, data["headline"]))
+        for j, pt in enumerate(data["points"][:3], start=1):
+            pj = f"{work}/s{j}.jpg"
+            reel_slide(pt, "", pj, small=True)
+            slides.append((pj, pt))
+        if is_al:
+            pj = f"{work}/s_ctx.jpg"
+            reel_slide(AL_CONTEXT, "", pj, small=True)
+            slides.append((pj, AL_CONTEXT))
+        pe = f"{work}/s_end.jpg"
+        reel_slide("সূত্র: " + item["source"] + "। আরও খবরের জন্য পেজটি ফলো করুন।", "", pe, small=True)
+        slides.append((pe, "সূত্র " + item["source"] + "। আরও খবরের জন্য পেজটি ফলো করুন।"))
 
-        if live:
-            try:
-                post_photo(card, text)
-                print("  posted news card")
-                if reel_path:
-                    post_reel(reel_path, text)
-                    print("  posted reel")
-                seen.add(key_of(item["link"]))
-                save_state(seen)
-                record["posted"] = True
-            except FBError as e:
-                print("  Facebook problem:", e)
-                record["posted"] = False
-                results.append(record)
-                break
-            time.sleep(20)
-        results.append(record)
+        rec = {"title": data["headline"], "source": item["source"], "link": item["link"],
+               "text": text, "awami_league_related": is_al, "card": card, "slides": slides,
+               "want_reel": reels_made < MAX_REELS}
+        if rec["want_reel"]:
+            reels_made += 1
+        ok = finish_item(rec, f"news{n}", live, seen, key_of(item["link"]))
+        results.append(rec)
+        if not ok:
+            break
 
     json.dump(results, open(f"{OUT}/posts.json", "w"), ensure_ascii=False, indent=2)
-    print(f"Done. {len(results)} news items prepared, {reels_made} reels.")
+    print(f"Done. {len(results)} posts prepared ({news_count} news), reels made: "
+          f"{sum(1 for r in results if r.get('reel'))}.")
 
 
 if __name__ == "__main__":
